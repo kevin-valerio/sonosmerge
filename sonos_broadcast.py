@@ -113,7 +113,20 @@ def discover_rooms() -> list[Room]:
     if not sonos_hosts:
         raise BroadcastError("Could not discover any Sonos rooms on the local network.")
 
-    zone_group_state = fetch_zone_group_state(sonos_hosts[0])
+    zone_group_state = None
+    last_error: BroadcastError | None = None
+    for host in sonos_hosts:
+        try:
+            zone_group_state = fetch_zone_group_state(host)
+            break
+        except BroadcastError as error:
+            last_error = error
+
+    if zone_group_state is None:
+        if last_error is not None:
+            raise last_error
+        raise BroadcastError("Could not read the Sonos room topology from any discovered host.")
+
     rooms_by_name: dict[str, Room] = {}
 
     for group in zone_group_state.findall(".//ZoneGroup"):
