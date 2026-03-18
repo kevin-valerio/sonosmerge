@@ -53,6 +53,7 @@ The menu bar app shows:
 - `Broadcast music everywhere`
 - `Everywhere rooms`
 - `Primary AirPlay room`
+- `Start at login`
 
 When you click `Broadcast music everywhere`, SonoMerge:
 

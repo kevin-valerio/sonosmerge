@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let defaultRooms = ["Salon TV", "Cuisine"]
@@ -114,6 +115,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
+    @objc private func toggleStartAtLogin() {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+                statusMessage = "Start at login disabled."
+            } else {
+                try SMAppService.mainApp.register()
+                if SMAppService.mainApp.status == .requiresApproval {
+                    statusMessage = "Start at login needs approval in System Settings."
+                } else {
+                    statusMessage = "Start at login enabled."
+                }
+            }
+
+            rebuildMenu()
+        } catch {
+            showFailure("Could not update start at login: \(error.localizedDescription)")
+        }
+    }
+
     private func rebuildMenu() {
         menu.removeAllItems()
 
@@ -171,6 +192,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 menu.addItem(roomItem)
             }
         }
+
+        menu.addItem(.separator())
+
+        let startAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        let startAtLoginItem = NSMenuItem(title: "Start at login", action: #selector(toggleStartAtLogin), keyEquivalent: "")
+        startAtLoginItem.target = self
+        startAtLoginItem.state = startAtLoginEnabled ? .on : .off
+        menu.addItem(startAtLoginItem)
 
         menu.addItem(.separator())
 

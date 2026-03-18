@@ -20,7 +20,8 @@ swiftc \
   "$ROOT_DIR/SonoMergeCore/SonoMergeCore.swift" \
   "$ROOT_DIR/SonoMergeMenuBarApp/main.swift" \
   -o "$EXECUTABLE_PATH" \
-  -framework AppKit
+  -framework AppKit \
+  -framework ServiceManagement
 
 cp "$ROOT_DIR/SonoMergeMenuBarApp/Info.plist" "$APP_DIR/Contents/Info.plist"
 chmod +x "$EXECUTABLE_PATH" "$CLI_PATH"
