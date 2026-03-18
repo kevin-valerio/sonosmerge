@@ -1,41 +1,24 @@
 import AppKit
 import Foundation
 
-enum BroadcastFailure: Error {
-    case message(String)
-
-    var text: String {
-        switch self {
-        case .message(let message):
-            return message
-        }
-    }
-}
-
-struct DiscoverResponse: Decodable {
-    let rooms: [DiscoveredRoom]
-}
-
-struct DiscoveredRoom: Decodable {
-    let name: String
-    let airplayEnabled: Bool
-}
-
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let defaultRooms = ["Salon TV", "Cuisine"]
     private let selectedRoomsDefaultsKey = "EverywhereRoomNames"
+    private let primaryRoomDefaultsKey = "PrimaryAirPlayRoomName"
 
     private let menu = NSMenu()
     private var statusItem: NSStatusItem?
 
-    private var currentRooms: [DiscoveredRoom] = []
+    private var currentRooms: [Room] = []
     private var selectedRoomNames: [String]
+    private var preferredPrimaryRoomName: String?
     private var statusMessage = "Ready"
     private var isBroadcasting = false
     private var isRefreshingRooms = false
 
     override init() {
         selectedRoomNames = UserDefaults.standard.stringArray(forKey: selectedRoomsDefaultsKey) ?? defaultRooms
+        preferredPrimaryRoomName = UserDefaults.standard.string(forKey: primaryRoomDefaultsKey) ?? defaultRooms.first
         super.init()
     }
 
@@ -65,9 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        let selectedRooms = selectedRoomNamesForBroadcast()
+        let selectedRooms = selectedRoomsForBroadcast()
         if selectedRooms.isEmpty {
-            showFailure("Pick at least one room in the Everywhere list first.")
+            showFailure("Pick at least one room in the Everywhere rooms list first.")
+            return
+        }
+
+        let primaryRoomName = currentPrimaryRoomName(selectedRooms: selectedRooms)
+        guard primaryRoomName != nil else {
+            showFailure("Pick a primary AirPlay room before starting the broadcast.")
             return
         }
 
@@ -76,9 +65,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMenu()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = self?.runBroadcastProcess(selectedRooms: selectedRooms)
+            guard let self else { return }
+            let result: Result<BroadcastResult, BroadcastError>
+            do {
+                result = .success(try SonoMergeCore.broadcast(
+                    roomNames: selectedRooms.map(\.name),
+                    preferredAirPlayTarget: primaryRoomName
+                ))
+            } catch let error as BroadcastError {
+                result = .failure(error)
+            } catch {
+                result = .failure(.message(error.localizedDescription))
+            }
+
             DispatchQueue.main.async {
-                self?.finishBroadcast(result)
+                self.finishBroadcast(result)
             }
         }
     }
@@ -94,7 +95,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             selectedRoomNames.append(roomName)
         }
 
-        persistSelectedRooms()
+        normalizePrimaryRoomSelection()
+        persistSelection()
+        rebuildMenu()
+    }
+
+    @objc private func selectPrimaryRoom(_ sender: NSMenuItem) {
+        guard let roomName = sender.representedObject as? String else {
+            return
+        }
+
+        preferredPrimaryRoomName = roomName
+        persistSelection()
         rebuildMenu()
     }
 
@@ -127,11 +139,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             loadingItem.isEnabled = false
             menu.addItem(loadingItem)
         } else {
-            for room in currentRooms.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) {
+            for room in currentRooms {
                 let roomItem = NSMenuItem(title: room.name, action: #selector(toggleRoomSelection(_:)), keyEquivalent: "")
                 roomItem.target = self
                 roomItem.representedObject = room.name
                 roomItem.state = selectedRoomNames.contains(room.name) ? .on : .off
+                menu.addItem(roomItem)
+            }
+        }
+
+        menu.addItem(.separator())
+
+        let primaryHeader = NSMenuItem(title: "Primary AirPlay room", action: nil, keyEquivalent: "")
+        primaryHeader.isEnabled = false
+        menu.addItem(primaryHeader)
+
+        let selectedRooms = selectedRoomsForBroadcast()
+        let primaryCandidates = selectedRooms.filter(\.airplayEnabled)
+
+        if primaryCandidates.isEmpty {
+            let hintItem = NSMenuItem(title: "Select at least one AirPlay room above", action: nil, keyEquivalent: "")
+            hintItem.isEnabled = false
+            menu.addItem(hintItem)
+        } else {
+            let primaryRoomName = currentPrimaryRoomName(selectedRooms: selectedRooms)
+            for room in primaryCandidates {
+                let roomItem = NSMenuItem(title: room.name, action: #selector(selectPrimaryRoom(_:)), keyEquivalent: "")
+                roomItem.target = self
+                roomItem.representedObject = room.name
+                roomItem.state = room.name == primaryRoomName ? .on : .off
                 menu.addItem(roomItem)
             }
         }
@@ -152,25 +188,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMenu()
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let result = self?.discoverRoomsProcess()
+            guard let self else { return }
+
+            let result: Result<[Room], BroadcastError>
+            do {
+                result = .success(try SonoMergeCore.discoverRooms())
+            } catch let error as BroadcastError {
+                result = .failure(error)
+            } catch {
+                result = .failure(.message(error.localizedDescription))
+            }
+
             DispatchQueue.main.async {
-                self?.finishRefreshingRooms(result)
+                self.finishRefreshingRooms(result)
             }
         }
     }
 
-    private func finishRefreshingRooms(_ result: Result<[DiscoveredRoom], BroadcastFailure>?) {
+    private func finishRefreshingRooms(_ result: Result<[Room], BroadcastError>) {
         isRefreshingRooms = false
-
-        guard let result else {
-            statusMessage = "Could not refresh rooms."
-            rebuildMenu()
-            return
-        }
 
         switch result {
         case .success(let rooms):
-            currentRooms = rooms
+            currentRooms = rooms.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            normalizePrimaryRoomSelection()
             statusMessage = "Ready"
             rebuildMenu()
 
@@ -180,91 +221,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func discoverRoomsProcess() -> Result<[DiscoveredRoom], BroadcastFailure> {
-        let result = runBundledScript(arguments: ["discover"])
-        switch result {
-        case .success(let output):
-            guard let data = output.data(using: .utf8) else {
-                return .failure(.message("SonoMerge could not decode the room list output."))
-            }
-
-            do {
-                let decoder = JSONDecoder()
-                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                let response = try decoder.decode(DiscoverResponse.self, from: data)
-                return .success(response.rooms)
-            } catch {
-                return .failure(.message("SonoMerge could not parse the room list: \(error.localizedDescription)"))
-            }
-
-        case .failure(let error):
-            return .failure(error)
-        }
+    private func selectedRoomsForBroadcast() -> [Room] {
+        let selectedRoomSet = Set(selectedRoomNames)
+        return currentRooms.filter { selectedRoomSet.contains($0.name) }
     }
 
-    private func runBroadcastProcess(selectedRooms: [String]) -> Result<String, BroadcastFailure> {
-        runBundledScript(arguments: ["broadcast", "--rooms"] + selectedRooms)
+    private func currentPrimaryRoomName(selectedRooms: [Room]) -> String? {
+        let primaryCandidates = selectedRooms.filter(\.airplayEnabled)
+
+        if let preferredPrimaryRoomName,
+           primaryCandidates.contains(where: { $0.name == preferredPrimaryRoomName }) {
+            return preferredPrimaryRoomName
+        }
+
+        return primaryCandidates.first?.name
     }
 
-    private func runBundledScript(arguments: [String]) -> Result<String, BroadcastFailure> {
-        guard let scriptURL = Bundle.main.url(forResource: "sonos_broadcast", withExtension: "py") else {
-            return .failure(.message("Bundled sonos_broadcast.py was not found."))
-        }
-
-        let process = Process()
-        let outputPipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["python3", scriptURL.path] + arguments
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-
-        do {
-            try process.run()
-        } catch {
-            return .failure(.message("Could not start the bundled broadcast script: \(error.localizedDescription)"))
-        }
-
-        process.waitUntilExit()
-
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let outputText = String(data: outputData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        if process.terminationStatus == 0 {
-            let successText = outputText.isEmpty ? "Broadcast completed." : outputText
-            return .success(successText)
-        }
-
-        let failureText = outputText.isEmpty ? "The bundled broadcast script failed." : outputText
-        return .failure(.message(failureText))
+    private func normalizePrimaryRoomSelection() {
+        let selectedRooms = selectedRoomsForBroadcast()
+        let newPrimaryRoomName = currentPrimaryRoomName(selectedRooms: selectedRooms)
+        preferredPrimaryRoomName = newPrimaryRoomName
+        persistSelection()
     }
 
-    private func selectedRoomNamesForBroadcast() -> [String] {
-        if currentRooms.isEmpty {
-            return selectedRoomNames
-        }
-
-        let availableRoomNames = Set(currentRooms.map(\.name))
-        return selectedRoomNames.filter { availableRoomNames.contains($0) }
-    }
-
-    private func persistSelectedRooms() {
+    private func persistSelection() {
         UserDefaults.standard.set(selectedRoomNames, forKey: selectedRoomsDefaultsKey)
+        UserDefaults.standard.set(preferredPrimaryRoomName, forKey: primaryRoomDefaultsKey)
     }
 
-    private func finishBroadcast(_ result: Result<String, BroadcastFailure>?) {
+    private func finishBroadcast(_ result: Result<BroadcastResult, BroadcastError>) {
         isBroadcasting = false
 
-        guard let result else {
-            statusMessage = "Broadcast failed."
-            rebuildMenu()
-            return
-        }
-
         switch result {
-        case .success(let message):
-            statusMessage = message
+        case .success(let result):
+            statusMessage = result.message
             rebuildMenu()
 
         case .failure(let error):
