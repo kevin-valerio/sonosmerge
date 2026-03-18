@@ -15,14 +15,16 @@ For example, if your selected `everywhere` rooms are `Salon TV` and `Cuisine`, S
 
 **What Is In This Repo**
 
-- `sonos_broadcast.py`
-  The reusable broadcast CLI. It discovers Sonos rooms, switches the Mac output, and groups the selected Sonos rooms.
+- `SonoMergeCore/`
+  The shared native Swift Sonos and AirPlay logic.
+- `SonoMergeCLI/`
+  The native Swift CLI source.
 - `switch-sonos-airplay.command`
   A quick fixed shortcut for the original setup. Right now it broadcasts to `Salon TV` and `Cuisine`.
 - `SonoMergeMenuBarApp/`
   The native macOS menu bar app source.
 - `build-menu-bar-app.sh`
-  Builds the local `.app` bundle into `build/SonoMerge.app`.
+  Builds the local `.app` bundle into `build/SonoMerge.app` and the native CLI into `build/sonos_broadcast`.
 
 **How The Menu Bar App Works**
 
@@ -34,13 +36,15 @@ The menu contains:
   Starts the broadcast flow.
 - `Everywhere rooms`
   A live checkbox list of the Sonos rooms that are currently visible on your network.
+- `Primary AirPlay room`
+  A radio-style list that lets you choose which checked room should receive the Mac audio directly.
 
 The app remembers the checked rooms across launches.
 
 When you click `Broadcast music everywhere`, the app:
 
 1. Reads the checked `everywhere` rooms.
-2. Picks the first checked AirPlay-capable room as the Mac output target.
+2. Uses the selected `Primary AirPlay room` as the Mac output target.
 3. Switches macOS audio to that room.
 4. Groups the other checked rooms into that Sonos room.
 
@@ -56,10 +60,11 @@ So the first launch will behave like the original request, even before you chang
 **Requirements**
 
 - macOS with Command Line Tools installed
-- `python3`
 - Sonos rooms reachable on the same local network as the Mac
 - Accessibility permission for the app or terminal that starts the broadcast
 - Apple Events / automation permission when macOS asks for it
+
+There is no external `python3` runtime dependency anymore. The app and CLI are native Swift binaries.
 
 **Important macOS Permissions**
 
@@ -101,17 +106,20 @@ Or by double-clicking `build/SonoMerge.app` in Finder.
 2. Launch `build/SonoMerge.app`.
 3. Click the speaker icon in the top bar.
 4. In `Everywhere rooms`, check the rooms you want.
-5. Click `Broadcast music everywhere`.
+5. In `Primary AirPlay room`, choose the room that should receive the Mac audio directly.
+6. Click `Broadcast music everywhere`.
 
 Example:
 
 - Checked rooms: `Salon TV`, `Cuisine`
+- Primary AirPlay room: `Salon TV`
 - Action: `Broadcast music everywhere`
 - Result: Mac audio goes to `Salon TV`, and Sonos groups `Cuisine` into it
 
 Another example:
 
 - Checked rooms: `Cuisine`
+- Primary AirPlay room: `Cuisine`
 - Action: `Broadcast music everywhere`
 - Result: Mac audio goes only to `Cuisine`
 
@@ -120,13 +128,13 @@ Another example:
 List visible Sonos rooms:
 
 ```bash
-python3 sonos_broadcast.py discover
+build/sonos_broadcast discover
 ```
 
 Broadcast to a custom set of rooms:
 
 ```bash
-python3 sonos_broadcast.py broadcast --rooms "Salon TV" "Cuisine"
+build/sonos_broadcast broadcast --rooms "Salon TV" "Cuisine" --primary-room "Salon TV"
 ```
 
 Run the original fixed shortcut:
@@ -147,6 +155,8 @@ The checkbox list is driven by live Sonos discovery, not a hardcoded room list.
 
 The saved `everywhere` selection is stored by the menu bar app and reused on the next launch.
 
+The selected `Primary AirPlay room` is also stored and reused on the next launch.
+
 If a room is temporarily offline, it may not appear in the checkbox list until it comes back on the network.
 
 **Troubleshooting**
@@ -157,12 +167,7 @@ If `Broadcast music everywhere` fails:
 - Make sure the Mac still sees the room as an AirPlay output in the Sound menu.
 - Make sure the app has Accessibility and Automation permission.
 - Re-open the menu and wait a second for the room list to refresh.
-
-If the wrong room becomes the main AirPlay target:
-
-- The app uses the saved checked-room order internally.
-- Today, the default order starts with `Salon TV`, then `Cuisine`.
-- If you want a different room to be the main AirPlay target, uncheck and re-check rooms in the order you want them saved.
+- Make sure the `Primary AirPlay room` is a checked room.
 
 **Implementation Note**
 
@@ -170,5 +175,5 @@ This project does not try to force macOS to keep two independent AirPlay room ch
 
 Instead, it does the thing that worked reliably during testing:
 
-- one Mac AirPlay target
+- one explicit Mac AirPlay target
 - Sonos grouping for the other selected rooms
