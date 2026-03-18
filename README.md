@@ -1,5 +1,7 @@
 # SonoMerge
 
+**TL;DR:** Broadcast your macOS audio to all your connected Sonos speakers in one click.
+
 SonoMerge is a small macOS menu bar app and CLI for Sonos + AirPlay setups where macOS does not reliably keep multiple Sonos AirPlay rooms selected at the same time.
 
 Instead of trying to force macOS to keep two separate AirPlay outputs checked, SonoMerge does this:

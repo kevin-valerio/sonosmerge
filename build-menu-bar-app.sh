@@ -24,6 +24,8 @@ swiftc \
   -framework ServiceManagement
 
 cp "$ROOT_DIR/SonoMergeMenuBarApp/Info.plist" "$APP_DIR/Contents/Info.plist"
+cp "$ROOT_DIR/SonoMergeMenuBarApp/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+cp "$ROOT_DIR/SonoMergeMenuBarApp/menubar-icon.svg" "$APP_DIR/Contents/Resources/menubar-icon.svg"
 chmod +x "$EXECUTABLE_PATH" "$CLI_PATH"
 
 printf 'Built %s\n' "$APP_DIR"

@@ -26,7 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "speaker.wave.3.fill", accessibilityDescription: "SonoMerge")
+            let image: NSImage?
+            if let iconURL = Bundle.main.url(forResource: "menubar-icon", withExtension: "svg") {
+                image = NSImage(contentsOf: iconURL)
+            } else {
+                image = NSImage(systemSymbolName: "speaker.wave.3.fill", accessibilityDescription: "SonoMerge")
+            }
             image?.isTemplate = true
             button.image = image
             button.toolTip = "SonoMerge"
