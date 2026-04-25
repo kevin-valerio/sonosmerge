@@ -402,6 +402,54 @@ enum SonoMergeCore {
         return result.output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    static func getVolume(host: String) throws -> Int {
+        let body = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+          <s:Body>
+            <u:GetVolume xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">
+              <InstanceID>0</InstanceID><Channel>Master</Channel>
+            </u:GetVolume>
+          </s:Body>
+        </s:Envelope>
+        """
+        let data = try soapRequest(
+            host: host,
+            path: "/MediaRenderer/RenderingControl/Control",
+            action: "urn:schemas-upnp-org:service:RenderingControl:1#GetVolume",
+            body: body
+        )
+        let doc = try parseXMLDocument(data)
+        let nodes = try doc.nodes(forXPath: "//*[local-name()='CurrentVolume']")
+        guard
+            let volumeString = (nodes.first as? XMLElement)?.stringValue,
+            let volume = Int(volumeString)
+        else {
+            throw BroadcastError.message("Could not read volume from host \(host).")
+        }
+        return volume
+    }
+
+    static func setVolume(host: String, volume: Int) throws {
+        let clamped = max(0, min(100, volume))
+        let body = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+          <s:Body>
+            <u:SetVolume xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">
+              <InstanceID>0</InstanceID><Channel>Master</Channel><DesiredVolume>\(clamped)</DesiredVolume>
+            </u:SetVolume>
+          </s:Body>
+        </s:Envelope>
+        """
+        _ = try soapRequest(
+            host: host,
+            path: "/MediaRenderer/RenderingControl/Control",
+            action: "urn:schemas-upnp-org:service:RenderingControl:1#SetVolume",
+            body: body
+        )
+    }
+
     private static func joinRoomToCoordinator(joinerRoom: Room, coordinatorUUID: String) throws {
         let body = """
         <?xml version="1.0" encoding="utf-8"?>
